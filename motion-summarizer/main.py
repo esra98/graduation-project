@@ -6,6 +6,11 @@ from shapely.geometry import Polygon
 import ast
 from datetime import datetime, timedelta
 import re
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from tabulate import tabulate
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Image, Spacer
 
 def find_object_with_highest_time_span(csv_file):
     # Read the CSV file
@@ -120,6 +125,23 @@ def get_frame_difference(object_id):
     data.set_index('object_id', inplace=True)
     return data.loc[object_id, 'first_frame_time'],data.loc[object_id, 'last_frame_time'],data.loc[object_id, 'time_span'],data.loc[object_id, 'color']
 
+def convert_yolo_to_opencv(yolo_box, image_width, image_height):
+    center_x, center_y, box_width, box_height = yolo_box
+
+    # Convert YOLO coordinates to absolute values
+    abs_center_x = int(center_x * image_width)
+    abs_center_y = int(center_y * image_height)
+    abs_box_width = int(box_width * image_width)
+    abs_box_height = int(box_height * image_height)
+
+    # Convert YOLO coordinates to OpenCV format
+    x = int(abs_center_x - abs_box_width / 2)
+    y = int(abs_center_y - abs_box_height / 2)
+    width = abs_box_width
+    height = abs_box_height
+
+    return x, y, width, height
+
 def frame_merger(frame_1, frame_2, obj_1, obj_2, most_recurrent):
     frame_2 = frame_2
     # create a VideoCapture object and open the video file
@@ -128,7 +150,7 @@ def frame_merger(frame_1, frame_2, obj_1, obj_2, most_recurrent):
     if not cap.isOpened():
         print('Error opening video file')
     # set the frame index to the desired frame number (e.g., 100)
-    frame_index = frame_1-25
+    frame_index = frame_1
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
     # read the frame at the specified index
     ret, frame = cap.read()
@@ -138,7 +160,7 @@ def frame_merger(frame_1, frame_2, obj_1, obj_2, most_recurrent):
     # save the frame as a JPEG image
     cv2.imwrite('frame1.jpg', frame)
      # set the frame index to the desired frame number (e.g., 100)
-    frame_index = frame_2-25
+    frame_index = frame_2
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
     # read the frame at the specified index
     ret, frame = cap.read()
@@ -157,6 +179,8 @@ def frame_merger(frame_1, frame_2, obj_1, obj_2, most_recurrent):
 
     # Blend the images using addWeighted
     canvas = cv2.addWeighted(img1, alpha, img2, beta, 0)
+    image_height, image_width, _ = canvas.shape
+    print(image_height,image_width)
     # load the csv file into a dataframe
     df = pd.read_csv('output.csv')
     obj_cordinates_frame_1_raw =  df[df['frame'].isin([frame_1])]['coordinate'].tolist()
@@ -168,62 +192,112 @@ def frame_merger(frame_1, frame_2, obj_1, obj_2, most_recurrent):
                 string_values = obj_cordinates_frame_1_raw[i].strip('[]').split()
                 float_values = [float(val) for val in string_values]
                 # Define the region of interest (ROI) you want to cut out from this float values
-                x = int(float_values[0])-10
-                y = int(float_values[1])-10
-                w = int(float_values[2])+20
-                h = int(float_values[3])+20
+                w = int(float_values[2])
+                x = int(float_values[0])
+                y = int(float_values[1])
+                h = int(float_values[3])
                 if str(csv_color) == "1":
                     color = (0, 0, 255)
                 elif str(csv_color) == "2":
-                    color = (100, 100, 255)
+                    color = (0, 0, 100)
                 elif str(csv_color) == "3":
-                    color = (255, 0, 255)
+                    color = (0, 100, 100)
                 elif str(csv_color) == "4":
-                    color = (255, 0, 0)
+                    color = (0, 100, 0)
                 else:
-                    color = (0, 0, 0)
-                thickness = 2    
+                    color = (0, 255, 0)
                 roi = img1[y:y+h, x:x+w]
                 canvas[y:y+h, x:x+w] = roi
-                cv2.rectangle(canvas, (x, y), (w,  h), color, thickness)
-                if(obj_1 == most_recurrent):
-                    cv2.rectangle(canvas, (x, y), (w,  h), (0, 0, 255), 5)
-                    cv2.putText(canvas, "MOST RECURRENT" + str(time_span) + str(first_frame_time), (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3)
-                else:
-                    cv2.putText(canvas, str(time_span) + str(first_frame_time), (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+                # labelling
+                text = (first_frame_time + " / " + time_span)
+                text_width, text_height = cv2.getTextSize(
+                    text=text,
+                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale=1,
+                    thickness=1,
+                )[0]
+                text_x = x + 10
+                text_y = y - 10
+                text_background_x1 = x
+                text_background_y1 = y - 2 * 10 - text_height
+                text_background_x2 = x + 2 * 10 + text_width
+                text_background_y2 = y
+                cv2.rectangle(
+                    img=canvas,
+                    pt1=(text_background_x1, text_background_y1),
+                    pt2=(text_background_x2, text_background_y2),
+                    color=color,
+                    thickness=cv2.FILLED,
+                )
+                cv2.putText(
+                    img=canvas,
+                    text=text,
+                    org=(text_x, text_y),
+                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale=1   ,
+                    color = (0, 0, 0),
+                    thickness=1,
+                    lineType=cv2.LINE_AA,
+                )
+
+                
 
     obj_cordinates_frame_2_raw =  df[df['frame'].isin([frame_2])]['coordinate'].tolist()
     obj_id_frame_2_raw =  df[df['frame'].isin([frame_2])]['object'].tolist()
     if(len(obj_cordinates_frame_2_raw)==len(obj_id_frame_2_raw)):
         for i in range(0, len(obj_cordinates_frame_2_raw)):
+            first_frame_time, last_frame_time, time_span, csv_color = get_frame_difference(obj_2)
+            string_values = obj_cordinates_frame_2_raw[i].strip('[]').split()
+            float_values = [float(val) for val in string_values]
             if(obj_2==obj_id_frame_2_raw[i]):
-                first_frame_time, last_frame_time, time_span, csv_color = get_frame_difference(obj_2)
-                string_values = obj_cordinates_frame_2_raw[i].strip('[]').split()
-                float_values = [float(val) for val in string_values]
                 # Define the region of interest (ROI) you want to cut out from this float values
-                x = int(float_values[0])-10
-                y = int(float_values[1])-10
-                w = int(float_values[2])+20
-                h = int(float_values[3])+20
+                w = int(float_values[2])
+                x = int(float_values[0])
+                y = int(float_values[1])
+                h = int(float_values[3])
                 if str(csv_color) == "1":
                     color = (0, 0, 255)
                 elif str(csv_color) == "2":
-                    color = (100, 100, 255)
+                    color = (0, 0, 100)
                 elif str(csv_color) == "3":
-                    color = (255, 0, 255)
+                    color = (0, 100, 100)
                 elif str(csv_color) == "4":
-                    color = (255, 0, 0)
+                    color = (0, 100, 0)
                 else:
-                    color = (0, 0, 0)
-                thickness = 2    
-                roi = img2[y:y+h, x:x+w]
+                    color = (0, 255, 0)
+                roi = img1[y:y+h, x:x+w]
                 canvas[y:y+h, x:x+w] = roi
-                cv2.rectangle(canvas, (x, y), (w,  h), color, thickness)
-                if(obj_2 == most_recurrent):
-                    cv2.rectangle(canvas, (x, y), (w,  h), (0, 0, 255), 5)
-                    cv2.putText(canvas, "MOST RECURRENT" + str(time_span) + str(first_frame_time), (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3)
-                else:
-                    cv2.putText(canvas, str(time_span) + str(first_frame_time), (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+                # labelling
+                text = (first_frame_time + " / " + time_span)
+                text_width, text_height = cv2.getTextSize(
+                    text=text,
+                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale=1,
+                    thickness=1,
+                )[0]
+                text_x = x + 10
+                text_y = y - 10
+                text_background_x1 = x
+                text_background_y1 = y - 2 * 10 - text_height
+                text_background_x2 = x + 2 * 10 + text_width
+                text_background_y2 = y
+                cv2.rectangle(
+                    img=canvas,
+                    pt1=(text_background_x1, text_background_y1),
+                    pt2=(text_background_x2, text_background_y2),
+                    color=color,
+                    thickness=cv2.FILLED,
+                )
+                cv2.putText(
+                    img=canvas,
+                    text=text,
+                    org=(text_x, text_y),
+                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale=1   ,
+                    color = (0, 0, 0),
+                    thickness=1,
+                    lineType=cv2.LINE_AA,
+                )
 
     # Define the filename to save the image as
     filename = 'merged.jpg'
@@ -264,14 +338,143 @@ def pair_list_id_frame(baselist, obj_list):
             first_list.append({"obj_id":0,"frame": ""})
     return first_list,second_list
     
+def get_middle_row_data(object_id):
+    df = pd.read_csv('output.csv')
+    object_df = df[df['object'] == object_id]
+    if not object_df.empty:
+        middle_index = object_df.shape[0] // 2
+        row = object_df.iloc[middle_index]
+        frame = row['frame']
+        coordinate = row['coordinate']
+        coordinate = [float(value) for value in coordinate.strip('[]').split()]
+        return frame, coordinate
+    return None, None  # Return None if no row matches the object ID
+
+def get_first_row_coordinate(object_id):
+    df = pd.read_csv('output.csv')
+    object_df = df[df['object'] == object_id]
+    if not object_df.empty:
+        coordinate = object_df.iloc[0]['coordinate']
+        coordinate = [float(value) for value in coordinate.strip('[]').split()]
+        return coordinate
+    return None  # Return None if no row matches the object ID
+
+def get_last_row_coordinate(object_id):
+    df = pd.read_csv('output.csv')
+    object_df = df[df['object'] == object_id]
+    if not object_df.empty:
+        last_index = object_df.shape[0] - 1
+        coordinate = object_df.iloc[last_index]['coordinate']
+        coordinate = [float(value) for value in coordinate.strip('[]').split()]
+        return coordinate
+    return None  # Return None if no row matches the object ID
+
+
+def reporter():
+    cap = cv2.VideoCapture('lab-record.ts')
+    df = pd.read_csv('object_first_last_frames.csv')
+    table_data = df[['object_id','first_frame', 'last_frame', 'first_frame_time', 'last_frame_time', 'time_span']]
+    table_data_list = table_data.values.tolist()
+    pdf_file = 'report.pdf'
+
+    # Create a SimpleDocTemplate object
+    doc = SimpleDocTemplate(pdf_file, pagesize=letter)
+    story = []
+
+    # Define table styles
+    table_style = TableStyle([
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 12),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+        ('BACKGROUND', (0, 0), (-1, 0), colors.gray),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('INNERGRID', (0, 0), (-1, -1), 0.25, colors.black),
+        ('BOX', (0, 0), (-1, -1), 0.25, colors.black),
+    ])
+
+    for i, row in enumerate(table_data_list):
+        object_id = row[0]
+        first_frame = row[1]
+        last_frame = row[2]
+        first_frame_time = row[3]
+        last_frame_time = row[4]
+        time_span = row[5]
+
+        # Save the images with unique filenames
+        person_enter_filename = f'person_enter_{object_id}.jpg'
+        person_middle_filename = f'person_middle_{object_id}.jpg'
+        person_exit_filename = f'person_exit_{object_id}.jpg'
+
+        # Save the images
+        #ADD ENTRANCE OF OBJECT IMAGE 
+        coordinate = get_first_row_coordinate(object_id)
+        # Define the region of interest (ROI) you want to cut out from this float values
+        person_w = int(coordinate[2])  
+        person_x = int(coordinate[0]) 
+        person_y = int(coordinate[1])
+        person_h = int(coordinate[3])
+        cap.set(cv2.CAP_PROP_POS_FRAMES, first_frame)
+        ret, frame = cap.read()
+        cropped_image = frame[person_y:person_h, person_x:person_w]
+        cv2.imwrite(person_enter_filename, cropped_image)
+
+        middle_frame, coordinate = get_middle_row_data(object_id)
+        # Define the region of interest (ROI) you want to cut out from this float values
+        person_w = int(coordinate[2])  
+        person_x = int(coordinate[0]) 
+        person_y = int(coordinate[1])
+        person_h = int(coordinate[3])
+        cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame)
+        ret, frame = cap.read()
+        cropped_image = frame[person_y:person_h, person_x:person_w]
+        cv2.imwrite(person_middle_filename, cropped_image)
+
+        coordinate = get_last_row_coordinate(object_id)
+        # Define the region of interest (ROI) you want to cut out from this float values
+        person_w = int(coordinate[2])  
+        person_x = int(coordinate[0]) 
+        person_y = int(coordinate[1])
+        person_h = int(coordinate[3])
+        cap.set(cv2.CAP_PROP_POS_FRAMES, last_frame)
+        ret, frame = cap.read()
+        cropped_image = frame[person_y:person_h, person_x:person_w]
+        cv2.imwrite(person_exit_filename, cropped_image)
+
+        # Create the nested table for the row
+        nested_table_data = [
+            ['', 'Enter Time', 'Exit Time', 'Duration'],
+            [
+                Image(person_enter_filename, width=100, height=100),
+                Image(person_middle_filename, width=100, height=100),
+                Image(person_exit_filename, width=100, height=100),
+                ''
+            ],
+            ['', first_frame_time, last_frame_time, time_span]
+        ]
+        nested_table = Table(nested_table_data)
+        nested_table.setStyle(table_style)
+
+        # Add the nested table to the main table
+        story.append(nested_table)
+        os.remove(person_enter_filename)
+        os.remove(person_middle_filename)
+        os.remove(person_exit_filename)
+        # Check if there is enough space for the next row
+        if i < len(table_data_list) - 1:
+            story.append(Spacer(1, 20))  # Add some spacing between rows
+
+    # Build the PDF document
+    doc.build(story)
 
 def main():
+    """
     unique_objects_list = unique_objects("output.csv")
     object_time_csv_former("output.csv", "13:00")
     most_recurrent = find_object_with_highest_time_span("object_first_last_frames.csv")
     important_frames_list= significant_frames_total_list(unique_objects_list)
     list1,list2 = pair_list_id_frame(important_frames_list,unique_objects_list)
- 
+    print(list1,list2)
     # create video writer
     cap = cv2.VideoCapture("lab-record.ts")
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -284,7 +487,8 @@ def main():
             frame_merger(list1[i]["frame"],list2[i]["frame"],list1[i]["obj_id"],list2[i]["obj_id"],most_recurrent)
             image = cv2.imread("merged.jpg")
             out.write(image)           
+    """
+    reporter()
     
-
 if __name__ == '__main__':
     main()
