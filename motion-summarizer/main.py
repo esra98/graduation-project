@@ -265,7 +265,7 @@ def frame_merger(frame_1, frame_2, obj_1, obj_2, most_recurrent):
                     color = (0, 100, 0)
                 else:
                     color = (0, 255, 0)
-                roi = img1[y:y+h, x:x+w]
+                roi = img2[y:y+h, x:x+w]
                 canvas[y:y+h, x:x+w] = roi
                 # labelling
                 text = (first_frame_time + " / " + time_span)
@@ -369,7 +369,6 @@ def get_last_row_coordinate(object_id):
         return coordinate
     return None  # Return None if no row matches the object ID
 
-
 def reporter():
     cap = cv2.VideoCapture('lab-record.ts')
     df = pd.read_csv('object_first_last_frames.csv')
@@ -406,7 +405,6 @@ def reporter():
         person_middle_filename = f'person_middle_{object_id}.jpg'
         person_exit_filename = f'person_exit_{object_id}.jpg'
 
-        # Save the images
         #ADD ENTRANCE OF OBJECT IMAGE 
         coordinate = get_first_row_coordinate(object_id)
         # Define the region of interest (ROI) you want to cut out from this float values
@@ -414,6 +412,7 @@ def reporter():
         person_x = int(coordinate[0]) 
         person_y = int(coordinate[1])
         person_h = int(coordinate[3])
+        # Save the images
         cap.set(cv2.CAP_PROP_POS_FRAMES, first_frame)
         ret, frame = cap.read()
         cropped_image = frame[person_y:person_h, person_x:person_w]
@@ -457,9 +456,7 @@ def reporter():
 
         # Add the nested table to the main table
         story.append(nested_table)
-        os.remove(person_enter_filename)
-        os.remove(person_middle_filename)
-        os.remove(person_exit_filename)
+
         # Check if there is enough space for the next row
         if i < len(table_data_list) - 1:
             story.append(Spacer(1, 20))  # Add some spacing between rows
@@ -468,9 +465,9 @@ def reporter():
     doc.build(story)
 
 def main():
-    """
     unique_objects_list = unique_objects("output.csv")
     object_time_csv_former("output.csv", "13:00")
+    reporter()
     most_recurrent = find_object_with_highest_time_span("object_first_last_frames.csv")
     important_frames_list= significant_frames_total_list(unique_objects_list)
     list1,list2 = pair_list_id_frame(important_frames_list,unique_objects_list)
@@ -487,8 +484,6 @@ def main():
             frame_merger(list1[i]["frame"],list2[i]["frame"],list1[i]["obj_id"],list2[i]["obj_id"],most_recurrent)
             image = cv2.imread("merged.jpg")
             out.write(image)           
-    """
-    reporter()
     
 if __name__ == '__main__':
     main()
