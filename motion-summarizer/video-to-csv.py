@@ -86,8 +86,8 @@ def main():
     #only process last 30 minutes of video
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = int(cap.get(cv2.CAP_PROP_FPS))
-    start_frame = total_frames - fps * 780
-    end_frame = total_frames
+    start_frame = total_frames - fps * 10020
+    end_frame = total_frames - fps * 8220
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
     # get video dimensions
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -95,11 +95,12 @@ def main():
     # create video writer
     fourcc =cv2.VideoWriter_fourcc('h', '2', '6', '4')
     out = cv2.VideoWriter('byproduct.mp4', fourcc, process_per_sec, (width, height))
-    frame_index=start_frame-1
+    frame_index=start_frame
     rows = []
     # Initialize previous frame
     prev_frame = None
     while True:   
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ret,frame = cap.read()
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         if not ret:
@@ -107,7 +108,6 @@ def main():
         if(frame_index>end_frame):
             break
         if ret:
-            frame_index=frame_index+1
             # Convert frame to grayscale
             if frame_index % math.floor(fps/process_per_sec) == 0:
                 # If previous frame is not None, compare with current frame
@@ -159,6 +159,7 @@ def main():
                     pass
             # Store current frame as previous frame
             prev_frame = gray
+        frame_index=frame_index+1
         # Wait for a key press, but only for a short time
         key = cv2.waitKey(1) & 0xFF
 
