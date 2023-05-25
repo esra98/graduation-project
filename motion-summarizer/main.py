@@ -11,6 +11,7 @@ from reportlab.pdfgen import canvas
 from tabulate import tabulate
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Image, Spacer
+import numpy as np
 
 def find_object_with_highest_time_span(csv_file):
     # Read the CSV file
@@ -179,8 +180,45 @@ def frame_merger(frame_1, frame_2, obj_1, obj_2, most_recurrent):
 
     # Blend the images using addWeighted
     canvas = cv2.addWeighted(img1, alpha, img2, beta, 0)
-    image_height, image_width, _ = canvas.shape
-    print(image_height,image_width)
+    # Set the color and position of the rectangle
+    rectangle_color = (128, 128, 128)  # Gray color in BGR format
+    rectangle_x1 = 0
+    rectangle_y1 = 0
+    rectangle_x2 = 1060  # Adjust the width of the rectangle as needed
+    rectangle_y2 = 50   # Adjust the height of the rectangle as needed
+
+    # Draw the rectangle on the canvas
+    cv2.rectangle(
+        img=canvas,
+        pt1=(rectangle_x1, rectangle_y1),
+        pt2=(rectangle_x2, rectangle_y2),
+        color=rectangle_color,
+        thickness=cv2.FILLED
+    )
+
+    # Set the text to display
+    text = " +10min|  5min.-10min.|  1min.-5min.|  2sec.-1min.|  < 2 sec."
+
+    # Set the position of the text
+    text_x = rectangle_x1 + 10  # Adjust the x-coordinate to provide padding
+    text_y = rectangle_y1 + 30  # Adjust the y-coordinate to center the text
+
+    # Draw the text on the canvas
+    cv2.putText(
+        img=canvas,
+        text=text,
+        org=(text_x, text_y),
+        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+        fontScale=1,
+        color=(255, 255, 255),  # White color in BGR format
+        thickness=1,
+        lineType=cv2.LINE_AA
+    )
+    cv2.circle(canvas, (10, 20), radius=10, color = (0, 0, 255), thickness=-1)
+    cv2.circle(canvas, (170, 20), radius=10, color = (0, 0, 100), thickness=-1)
+    cv2.circle(canvas, (430, 20), radius=10, color = (0, 100, 100), thickness=-1)
+    cv2.circle(canvas, (670, 20), radius=10, color = (0, 100, 0), thickness=-1)
+    cv2.circle(canvas, (910, 20), radius=10, color = (0, 255, 0), thickness=-1)
     # load the csv file into a dataframe
     df = pd.read_csv('output.csv')
     obj_cordinates_frame_1_raw =  df[df['frame'].isin([frame_1])]['coordinate'].tolist()
@@ -368,6 +406,59 @@ def get_last_row_coordinate(object_id):
         coordinate = [float(value) for value in coordinate.strip('[]').split()]
         return coordinate
     return None  # Return None if no row matches the object ID
+#to improve color in the report
+def update(dot_color):
+    r, g, b = dot_color
+
+    # Update the color by reducing the green and blue channels
+    r += 0
+    g -= 1
+    b += 1
+
+    # Make sure the color values stay within the valid range (0-255)
+    r = max(0, min(r, 255))
+    g = max(0, min(g, 255))
+    b = max(0, min(b, 255))
+
+    return (r, g, b)
+def mapper(id):
+    # Load the CSV file
+    csv_file = 'output.csv'
+
+    # Read the image with 20% opacity
+    image_path = 'blank.jpg'
+    image = cv2.imread(image_path)
+    overlay = np.zeros_like(image)
+    alpha = 0.9  # Opacity of 20%
+    background = cv2.addWeighted(image, 1 - alpha, overlay, alpha, 0)
+
+    # Define the dot color with 10% opacity
+    dot_color = (0, 255, 0)  # Green color with 10% opacity
+
+    # Read the CSV file into a DataFrame using pandas
+    df = pd.read_csv(csv_file)
+
+    # Filter rows where object == 1
+    df_filtered = df[df['object'] == id]
+
+    # Iterate through each row in the filtered DataFrame
+    for index, row in df_filtered.iterrows():
+        coordinates = row['coordinate']
+        # Parse the coordinates
+        x1, y1, x2, y2 = map(float, coordinates.strip('[]').split())
+
+        # Calculate the middle point of the bounding box
+        x_middle = int((x1 + x2) / 2)
+        y_middle = int((y1 + y2) / 2)
+        # Draw a dot at the middle point on the image with 10% opacity
+        cv2.circle(background, (int(x_middle), int(y_middle)), radius=2, color=dot_color, thickness=-1)
+        #update color
+        dot_color = update(dot_color)
+        
+
+    # Save the image with dots and 20% opacity
+    output_image_path = 'mapped_'+str(id)+'.jpg'
+    cv2.imwrite(output_image_path, background)
 
 def reporter():
     cap = cv2.VideoCapture('lab-record.ts')
@@ -439,17 +530,21 @@ def reporter():
         ret, frame = cap.read()
         cropped_image = frame[person_y:person_h, person_x:person_w]
         cv2.imwrite(person_exit_filename, cropped_image)
-
+        # rewrite mapped.jpg image file for object
+        mapper(object_id)
+        
         # Create the nested table for the row
         nested_table_data = [
-            ['', 'Enter Time', 'Exit Time', 'Duration'],
+            ['Enter', 'Middle', 'Exit', 'Path'],
             [
                 Image(person_enter_filename, width=100, height=100),
                 Image(person_middle_filename, width=100, height=100),
                 Image(person_exit_filename, width=100, height=100),
+                Image('mapped_'+str(object_id)+'.jpg', width=100, height=100),
                 ''
             ],
-            ['', first_frame_time, last_frame_time, time_span]
+            ['Enter Time','', 'Exit Time', 'Duration'],
+            [first_frame_time, '',last_frame_time, time_span]
         ]
         nested_table = Table(nested_table_data)
         nested_table.setStyle(table_style)
@@ -484,6 +579,7 @@ def main():
             frame_merger(list1[i]["frame"],list2[i]["frame"],list1[i]["obj_id"],list2[i]["obj_id"],most_recurrent)
             image = cv2.imread("merged.jpg")
             out.write(image)           
+    
     
 if __name__ == '__main__':
     main()
